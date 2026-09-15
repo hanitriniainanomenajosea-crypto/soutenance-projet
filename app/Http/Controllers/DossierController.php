@@ -5,7 +5,7 @@ use App\Models\Boite;
 use App\Models\Dossier;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
-
+use App\Models\Log;
 class DossierController extends Controller
 {
      // Affiche la liste des dossiers
@@ -69,13 +69,19 @@ public function show(Request $request, $id)
         'boite_id'         => 'required|exists:boites,id',
     ]);
 
-    Dossier::create([
+    $dossier = Dossier::create([
         'numero_reference' => $validated['numero_reference'],
         'titre'            => $validated['titre'],
         'description'      => $validated['description'] ?? null,
         'boite_id'         => $validated['boite_id'],
-        'user_id'          => auth()->id(), // Associe le dossier à l'utilisateur connecté
+        'user_id'          => auth()->id(),
     ]);
+
+    // --- AJOUT DE L'HISTORIQUE ---
+    Log::record(
+        'Création Dossier',
+        "Création du dossier '{$dossier->titre}' (Réf: {$dossier->numero_reference})"
+    );
 
     return redirect()->back()->with('success', 'Dossier créé avec succès !');
 }
@@ -83,8 +89,15 @@ public function show(Request $request, $id)
     public function destroy($id)
 {
     $dossier = Dossier::findOrFail($id);
+
+    // --- AJOUT DE L'HISTORIQUE (avant de supprimer) ---
+    Log::record(
+        'Suppression Dossier',
+        "Suppression du dossier '{$dossier->titre}' (Réf: {$dossier->numero_reference})"
+    );
+
     $dossier->delete();
 
     return redirect()->back()->with('success', 'Dossier supprimé avec succès');
-}    
+} 
 }

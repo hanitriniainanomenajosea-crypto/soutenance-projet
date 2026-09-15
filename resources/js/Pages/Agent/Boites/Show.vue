@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { Link } from '@inertiajs/vue3';
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+
 
 const props = defineProps({
     boite: Object,
@@ -19,7 +19,7 @@ const filteredDossiers = computed(() => {
 </script>
 
 <template>
-    <AuthenticatedLayout>
+    
         <div class="p-6 space-y-6">
             <!-- Bouton Retour -->
             <div>
@@ -95,5 +95,5 @@ const filteredDossiers = computed(() => {
                 </div>
             </div>
         </div>
-    </AuthenticatedLayout>
+    
 </template>

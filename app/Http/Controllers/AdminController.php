@@ -9,23 +9,25 @@ use App\Models\Dossier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Inertia\Inertia;
-
+use App\Models\Log;
 class AdminController extends Controller
 {
     public function index()
-    {
-        return Inertia::render('Admin/Dashboard', [
-            'services' => Service::all(),
-            'users' => User::with('service')->latest()->get(),
-            'dossiers' => Dossier::with(['boite.casier.service'])->latest()->get(),
-            'stats' => [
-                'services' => Service::count(),
-                'users' => User::count(),
-                'boites' => Boite::count(),
-                'dossiers' => Dossier::count(),
-            ],
-        ]);
-    }
+{
+    return Inertia::render('Admin/Dashboard', [
+        'services' => Service::all(),
+        'users'    => User::with('service')->latest()->get(),
+        'dossiers' => Dossier::with(['boite.casier.service'])->latest()->get(),
+        'stats'    => [
+            'services' => Service::count(),
+            'users'    => User::count(),
+            'boites'   => Boite::count(),
+            'dossiers' => Dossier::count(),
+        ],
+        // --- AJOUT DE L'HISTORIQUE DES LOGS ---
+        'logs'     => Log::with('user')->latest()->take(10)->get(),
+    ]);
+}
 
     // Enregistrement d'un nouvel utilisateur
     public function storeUser(Request $request)
@@ -46,6 +48,11 @@ class AdminController extends Controller
             'service_id' => $request->role === 'agent' ? $request->service_id : null,
         ]);
 
+        Log::record(
+    'Création Utilisateur',
+    "Création de l'utilisateur {$request->name} ({$request->email})"
+);
+
         return back()->with('success', 'Compte créé avec succès.');
     }
 
@@ -63,12 +70,22 @@ class AdminController extends Controller
             'service_id' => $request->role === 'agent' ? $request->service_id : null,
         ]);
 
+        Log::record(
+    'Modification Utilisateur',
+    "Mise à jour du compte de {$user->name}"
+);
+
         return back()->with('success', 'Utilisateur mis à jour avec succès.');
     }
 
     // Suppression d'un utilisateur
     public function destroyUser(User $user)
     {
+        Log::record(
+    'Suppression Utilisateur',
+    "Suppression de l'utilisateur {$user->name} ({$user->email})"
+);
+
         $user->delete();
 
         return back()->with('success', 'Utilisateur supprimé avec succès.');

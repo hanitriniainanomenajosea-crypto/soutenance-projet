@@ -2,12 +2,15 @@
 import { onMounted, ref, computed, watch, nextTick } from 'vue';
 import { useForm, usePage, Head, Link, router } from '@inertiajs/vue3';
 import { Chart, registerables } from 'chart.js';
+import Sidebar from '@/Components/Sidebar.vue';
+const isCollapsed = ref(false)
 
 const props = defineProps({
     services: Array,
     users: Array,
     dossiers: Array,
     stats: Object,
+    logs: Array,
 });
 const isMenuOpen = ref(false);
 const page = usePage();
@@ -28,22 +31,60 @@ const openDossier = (dossier) => {
 // Filtres
 const searchQuery = ref('');
 const selectedService = ref('');
+const roleFilter = ref('');
+const logSearchQuery = ref('');
+const actionFilter = ref('');
 
 // Calcul dynamique des dossiers filtrés
 const filteredDossiers = computed(() => {
-    if (!props.dossiers) return [];
-    
-    return props.dossiers.filter(dossier => {
-        const query = searchQuery.value.toLowerCase();
-        const matchesSearch = 
-            (dossier.titre && dossier.titre.toLowerCase().includes(query)) ||
-            (dossier.reference && dossier.reference.toLowerCase().includes(query));
+  if (!props.dossiers) return [];
 
-        const matchesService = !selectedService.value || 
-            (dossier.boite && dossier.boite.service_id == selectedService.value);
+  return props.dossiers.filter(dossier => {
+    // 1. Filtre par recherche textuelle (titre / référence)
+    const query = searchQuery.value ? searchQuery.value.toLowerCase().trim() : '';
+    const matchesSearch = !query || 
+      (dossier.titre && dossier.titre.toLowerCase().includes(query)) ||
+      (dossier.numero_reference && dossier.numero_reference.toLowerCase().includes(query)) ||
+      (dossier.reference && dossier.reference.toLowerCase().includes(query));
 
-        return matchesSearch && matchesService;
-    });
+    // 2. Filtre par Service
+    const selected = selectedService.value;
+
+    // Si aucun service n'est sélectionné ou si "Tous les services" est choisi
+    const isAllSelected = !selected || selected === '' || selected === 'Tous les services' || selected === 'all';
+
+    if (isAllSelected) {
+      return matchesSearch;
+    }
+
+    // Récupération des IDs et Noms du service du dossier pour comparaison
+    const dossierServiceId = dossier.service_id || dossier.service?.id || dossier.boite?.service_id || dossier.boite?.casier?.service_id;
+    const dossierServiceName = (dossier.service?.nom || dossier.service_nom || dossier.boite?.casier?.service?.nom || '').toLowerCase().trim();
+    const filterValue = String(selected).toLowerCase().trim();
+
+    // Comparaison souple (par ID numérique OU par nom de service)
+    const matchesService = 
+      String(dossierServiceId) === filterValue || 
+      dossierServiceName === filterValue ||
+      (dossierServiceName && dossierServiceName.includes(filterValue));
+
+    return matchesSearch && matchesService;
+  });
+});
+
+const filteredLogs = computed(() => {
+  if (!props.logs) return [];
+  return props.logs.filter(log => {
+    const query = logSearchQuery.value.toLowerCase().trim();
+    const userMatch = (log.user_email || log.user?.email || '').toLowerCase().includes(query);
+    const descMatch = (log.description || log.details || '').toLowerCase().includes(query);
+    const ipMatch = (log.ip_address || log.ip || '').toLowerCase().includes(query);
+    const matchesSearch = !query || userMatch || descMatch || ipMatch;
+
+    const matchesAction = !actionFilter.value || log.action === actionFilter.value;
+
+    return matchesSearch && matchesAction;
+  });
 });
 
 const form = useForm({
@@ -89,18 +130,36 @@ const submitEditUser = () => {
     });
 };
 
+// Filtre dynamique des utilisateurs
+const filteredUsers = computed(() => {
+  const list = props.users || [];
+
+  return list.filter(user => {
+    // Recherche par nom ou email
+    const query = searchQuery.value ? searchQuery.value.toLowerCase().trim() : '';
+    const nameMatch = user.name ? user.name.toLowerCase().includes(query) : false;
+    const emailMatch = user.email ? user.email.toLowerCase().includes(query) : false;
+    const matchesSearch = !query || nameMatch || emailMatch;
+
+    // Filtre par rôle (admin / agent)
+    const matchesRole = !roleFilter.value || user.role === roleFilter.value;
+
+    return matchesSearch && matchesRole;
+  });
+});
+
 const deleteUser = (user) => {
     if (confirm(`Voulez-vous vraiment supprimer le compte de ${user.email} ?`)) {
         router.delete(route('admin.users.destroy', user.id));
     }
 };
 
-
 Chart.register(...registerables);
 
-const chartCanvas = ref(null);
 let chartInstance = null;
-
+const chartCanvas = ref(null);
+const barChartCanvas = ref(null);
+let barChartInstance = null;
 // Données calculées
 const chartData = computed(() => {
     const servicesCount = {};
@@ -129,40 +188,54 @@ const chartData = computed(() => {
         }]
     };
 });
+const activeTab = ref('dashboard')
 
 const renderChart = async () => {
-    await nextTick();
+  await nextTick();
+  
+  setTimeout(() => {
     if (!chartCanvas.value) return;
+    const ctx = chartCanvas.value.getContext('2d');
+    if (!ctx) return;
 
     if (chartInstance) {
-        chartInstance.destroy();
+      chartInstance.destroy();
     }
 
-    const ctx = chartCanvas.value.getContext('2d');
     chartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: chartData.value,
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            cutout: '75%'
-        }
+      type: 'doughnut',
+      data: chartData.value,
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: false
+          }
+        },
+        cutout: '75%'
+      }
     });
+  }, 100);
 };
 
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'dashboard' || newTab === 'dashbord') {
+    renderChart();
+  }
+});
+
 onMounted(() => {
-    setTimeout(() => {
-        renderChart();
-    }, 100);
+  setTimeout(() => {
+    renderChart();      
+    renderBarChart();  
+  }, 100);
 });
 
 watch(() => props.dossiers, () => {
-    renderChart();
+  renderChart();
+  renderBarChart();
 }, { deep: true });
 
 const formatDate = (dateString) => {
@@ -171,7 +244,73 @@ const formatDate = (dateString) => {
   return date.toLocaleDateString('fr-FR', {
     day: '2-digit',
     month: '2-digit',
-    year: 'numeric'
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+// À insérer vers la ligne 212 (juste après formatDate):
+const getActionBadgeStyle = (action) => {
+  if (!action) return 'bg-slate-100 text-slate-600';
+  const act = action.toLowerCase();
+  
+  if (act.includes('création') || act.includes('créer')) {
+    return 'bg-blue-50 text-blue-600 border border-blue-100';
+  } else if (act.includes('connexion')) {
+    return 'bg-purple-50 text-purple-600 border border-purple-100';
+  } else if (act.includes('modification')) {
+    return 'bg-amber-50 text-amber-700 border border-amber-100';
+  } else if (act.includes('suppression')) {
+    return 'bg-rose-50 text-rose-600 border border-rose-100';
+  }
+  return 'bg-slate-100 text-slate-600';
+};
+
+const refreshLogs = () => {
+  router.reload({ only: ['logs'] });
+};
+
+const renderBarChart = async () => {
+  await nextTick();
+  if (!barChartCanvas.value) return;
+
+  if (barChartInstance) {
+    barChartInstance.destroy();
+  }
+
+  const ctx = barChartCanvas.value.getContext('2d');
+  barChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Mai', 'Juin', 'Juil', 'Août', 'Sept (En cours)'],
+      datasets: [{
+        label: 'Entrées',
+        data: [12, 19, 14, 22, props.dossiers?.length || 8],
+        backgroundColor: '#3b82f6',
+        borderRadius: 6,
+        barThickness: 22,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: true }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#94a3b8', font: { size: 11 } }
+        },
+        y: {
+          min: 0,
+          max: 25,
+          ticks: { stepSize: 5, color: '#94a3b8', font: { size: 11 } },
+          grid: { color: '#f1f5f9' }
+        }
+      }
+    }
   });
 };
 </script>
@@ -180,21 +319,15 @@ const formatDate = (dateString) => {
     <Head title="Tableau de Bord Admin" />
 
     <div class="min-h-screen bg-slate-100 font-sans">
+    <Sidebar v-model:isCollapsed="isCollapsed" 
+    v-model:activeTab="activeTab"
+    />
+
+    <main :class="['flex-1 transition-all duration-300 py-8 px-6 space-y-8', isCollapsed ? 'ml-20' : 'ml-64']">
         
         <!-- Barre de Navigation Supérieure -->
-        <nav class="bg-slate-900 text-white px-6 py-3 flex items-center justify-between relative z-50">
-    <!-- Gauche : Titre -->
-    <div class="flex items-center gap-3">
-        <div class="bg-blue-600 p-2 rounded-lg">
-            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-            </svg>
-        </div>
-        <div>
-            <h1 class="font-bold text-lg leading-tight">Archivage Numérique</h1>
-            <span class="text-xs uppercase font-semibold text-blue-400">ADMIN</span>
-        </div>
-    </div>
+        <nav class="flex justify-end items-center mb-6 relative z-50 ">
+
 
     <!-- Droite : Menu Déroulant Profil -->
         <div class="relative">
@@ -289,11 +422,12 @@ const formatDate = (dateString) => {
         </div>
         </nav>
 
+       
         <!-- Contenu Principal -->
         <main class="max-w-7xl mx-auto py-8 px-6 space-y-8">
             
             <!-- Bandeau de Bienvenue -->
-            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
+            <div v-if="activeTab === 'dashboard'" class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 ">
                 <div>
                     <h2 class="text-2xl font-bold text-slate-800">Tableau de Bord Global</h2>
                     <p class="text-slate-500 text-sm mt-1">Supervision de l'ensemble des services, utilisateurs et archives.</p>
@@ -304,222 +438,417 @@ const formatDate = (dateString) => {
                 </span>
             </div>
 
-            <!-- Cartes Statisiques -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-    <!-- Services -->
-    <div class="bg-white p-5 rounded-2xl border-2 border-slate-100 hover:border-blue-500/40 shadow-sm hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 flex items-center justify-between group">
+
+            
+
+            <!-- 1. CARTES DE STATISTIQUES -->
+    <div  v-if="activeTab === 'dashboard'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- Services -->
+      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex justify-between items-start">
         <div>
-            <p class="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover:text-blue-600 transition-colors">Services</p>
-            <h3 class="text-2xl font-black text-slate-800 mt-1">{{ stats?.services || 0 }}</h3>
+          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SERVICES</span>
+          <p class="text-3xl font-extrabold text-slate-800 mt-1">{{ stats?.services || 0 }}</p>
+          <p class="text-xs text-emerald-600 font-semibold mt-2 flex items-center gap-1">
+            <span>✓</span> Tous opérationnels
+          </p>
         </div>
-        <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
-            🏛️
+        <div class="p-3 bg-blue-50 text-blue-600 rounded-lg">
+          🏛️
         </div>
+      </div>
+
+      <!-- Utilisateurs -->
+      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex justify-between items-start">
+        <div>
+          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">UTILISATEURS</span>
+          <p class="text-3xl font-extrabold text-slate-800 mt-1">{{ stats?.users || 0 }}</p>
+          <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
+            <span>👥</span> Admins & Agents
+          </p>
+        </div>
+        <div class="p-3 bg-blue-50 text-blue-600 rounded-lg">
+          👤
+        </div>
+      </div>
+
+      <!-- Boîtes -->
+      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex justify-between items-start">
+        <div>
+          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">BOÎTES</span>
+          <p class="text-3xl font-extrabold text-slate-800 mt-1">{{ stats?.boites || 0 }}</p>
+          <p class="text-xs text-amber-600 font-semibold mt-2 flex items-center gap-1">
+            <span>📦</span> Casiers répertoriés
+          </p>
+        </div>
+        <div class="p-3 bg-amber-50 text-amber-600 rounded-lg">
+          📦
+        </div>
+      </div>
+
+      <!-- Dossiers -->
+      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex justify-between items-start">
+        <div>
+          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DOSSIERS</span>
+          <p class="text-3xl font-extrabold text-slate-800 mt-1">{{ stats?.dossiers || 0 }}</p>
+          <p class="text-xs text-emerald-600 font-semibold mt-2 flex items-center gap-1">
+            <span>📂</span> Numérisés au total
+          </p>
+        </div>
+        <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
+          📂
+        </div>
+      </div>
+
     </div>
 
-    <!-- Utilisateurs -->
-    <div class="bg-white p-5 rounded-2xl border-2 border-slate-100 hover:border-indigo-500/40 shadow-sm hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 flex items-center justify-between group">
-        <div>
-            <p class="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover:text-indigo-600 transition-colors">Utilisateurs</p>
-            <h3 class="text-2xl font-black text-slate-800 mt-1">{{ stats?.users || 0 }}</h3>
-        </div>
-        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
-            👥
-        </div>
+<div v-if="activeTab === 'users'" class="space-y-6">
+
+  <!-- 1. EN-TÊTE : Titre + Sous-titre + Badge + Bouton Nouveau Compte -->
+  <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-bold text-slate-800">Utilisateurs Enregistrés</h2>
+      <p class="text-sm text-slate-500 mt-1">Gestion des accès, attributions des services municipaux et gestion des rôles d'agents.</p>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 mt-3 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+        {{ users?.length || 0 }} comptes actifs
+      </span>
+    </div>
+    <button @click="openCreateUserModal" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl transition shadow-sm self-start md:self-auto">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+      Nouveau Compte
+    </button>
+  </div>
+
+  <!-- 2. CARTES STATISTIQUES (Total, Agents, Admins) -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Total -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-wider text-slate-400">TOTAL UTILISATEURS</p>
+        <p class="text-3xl font-black text-slate-800 mt-1">{{ users?.length || 0 }}</p>
+        <p class="text-xs text-slate-400 mt-1">Accès enregistrés</p>
+      </div>
+      <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+      </div>
     </div>
 
-    <!-- Boîtes d'archives -->
-    <div class="bg-white p-5 rounded-2xl border-2 border-slate-100 hover:border-amber-500/40 shadow-sm hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 flex items-center justify-between group">
-        <div>
-            <p class="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover:text-amber-600 transition-colors">Boîtes</p>
-            <h3 class="text-2xl font-black text-slate-800 mt-1">{{ stats?.boites || 0 }}</h3>
-        </div>
-        <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
-            📦
-        </div>
+    <!-- Agents -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-wider text-slate-400">AGENTS MUNICIPAUX</p>
+        <p class="text-3xl font-black text-slate-800 mt-1">
+          {{ users?.filter(u => u.role === 'agent').length || 0 }}
+        </p>
+        <p class="text-xs font-medium text-emerald-600 mt-1 flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          Opérationnels
+        </p>
+      </div>
+      <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>
+      </div>
     </div>
 
-    <!-- Dossiers d'archives -->
-    <div class="bg-white p-5 rounded-2xl border-2 border-slate-100 hover:border-emerald-500/40 shadow-sm hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 flex items-center justify-between group">
-        <div>
-            <p class="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover:text-emerald-600 transition-colors">Dossiers</p>
-            <h3 class="text-2xl font-black text-slate-800 mt-1">{{ stats?.dossiers || 0 }}</h3>
-        </div>
-        <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
-            📁
-        </div>
+    <!-- Admins -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-wider text-slate-400">ADMINISTRATEURS</p>
+        <p class="text-3xl font-black text-slate-800 mt-1">
+          {{ users?.filter(u => u.role === 'admin').length || 0 }}
+        </p>
+        <p class="text-xs font-medium text-purple-600 mt-1 flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          Superviseur
+        </p>
+      </div>
+      <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      </div>
     </div>
+  </div>
+
+  <!-- 3. TABLEAU DES UTILISATEURS AVEC BARRE DE RECHERCHE -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    
+    <!-- Zone Filtres -->
+    <div class="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="relative flex-1 max-w-md">
+        <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input 
+          v-model="searchQuery" 
+          type="text" 
+          placeholder="Rechercher par email ou nom..." 
+          class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+        />
+      </div>
+
+      <div class="flex items-center gap-3">
+        <select v-model="roleFilter" class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+          <option value="">Tous les rôles</option>
+          <option value="admin">Administrateurs</option>
+          <option value="agent">Agents</option>
+        </select>
+        <span class="px-3 py-2 bg-slate-100 text-slate-600 text-xs font-semibold rounded-xl">
+          {{ filteredUsers.length }} sur {{ users?.length || 0 }} utilisateurs
+        </span>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="border-b border-slate-100 bg-slate-50/50 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            <th class="py-4 px-6">IDENTIFIANT / NOM</th>
+            <th class="py-4 px-6">EMAIL</th>
+            <th class="py-4 px-6">RÔLE</th>
+            <th class="py-4 px-6">SERVICE MUNICIPALE</th>
+            <th class="py-4 px-6 text-right">ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-sm">
+          <tr v-for="user in filteredUsers" :key="user.id" class="hover:bg-slate-50/60 transition">
+            <!-- Avatar + Nom -->
+            <td class="py-4 px-6 font-semibold text-slate-800">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-sm"
+                     :class="user.role === 'admin' ? 'bg-purple-600' : 'bg-blue-600'">
+                  {{ (user.name || user.email).charAt(0).toUpperCase() }}
+                </div>
+                <span>{{ user.name || 'Agent' }}</span>
+              </div>
+            </td>
+
+            <!-- Email -->
+            <td class="py-4 px-6 text-slate-500 font-mono text-xs">{{ user.email }}</td>
+
+            <!-- Rôle Badge -->
+            <td class="py-4 px-6">
+              <span class="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                    :class="user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'">
+                {{ user.role }}
+              </span>
+            </td>
+
+            <!-- Service Municipal -->
+            <td class="py-4 px-6 text-slate-600">
+              {{ user.service?.nom || '—' }}
+            </td>
+
+            <!-- Actions -->
+            <td class="py-4 px-6 text-right">
+              <div class="flex items-center justify-end gap-2">
+                <button type="button" @click="openEditUser(user)" class="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-xs rounded-lg transition border border-amber-200/50">
+                  ✏️ Modifier
+                </button>
+                <button type="button" @click="deleteUser(user)" class="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-xs rounded-lg transition border border-rose-200/50">
+                  🗑️ Supprimer
+                </button>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Si aucun utilisateur n'est trouvé -->
+          <tr v-if="filteredUsers.length === 0">
+            <td colspan="5" class="py-8 text-center text-slate-400 text-sm">
+              Aucun utilisateur trouvé.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+      <span>Affichage de {{ filteredUsers.length }} utilisateur(s)</span>
+      <div class="flex items-center gap-1">
+        <button class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-400 cursor-not-allowed">Précédent</button>
+        <button class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold">1</button>
+        <button class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Suivant</button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<!-- Liste des Utilisateurs Récents -->
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                <h3 class="text-lg font-bold text-slate-800 mb-4">Utilisateurs Enregistrés</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-sm text-slate-600">
-                        <thead class="bg-slate-50 text-slate-400 text-xs uppercase font-semibold">
-                            <tr>
-                                <th class="p-3 rounded-l-lg">Nom</th>
-                                <th class="p-3">Email</th>
-                                <th class="p-3">Rôle</th>
-                                <th class="p-3 rounded-r-lg">Service</th>
-                                <th class="px-6 py-3 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                            <tr v-for="user in users" :key="user.id" class="hover:bg-slate-50">
-                                <td class="p-3 font-medium text-slate-800">{{ user.name }}</td>
-                                <td class="p-3">{{ user.email }}</td>
-                                <td class="p-3">
-                                    <span :class="user.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'" class="px-2.5 py-0.5 rounded-full text-xs font-semibold">
-                                        {{ user.role }}
-                                    </span>
-                                </td>
-                                <td class="p-3 text-slate-500">{{ user.service?.nom || '—' }}</td>
-                                <td class="p-3 text-right space-x-2">
-                <button 
-                    type="button"
-                    @click="openEditUser(user)"
-                    class="px-2 py-1 text-xs font-semibold text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
-                >
-                    ✏️ Modifier
-                </button>
-                <button 
-                    type="button"
-                    @click="deleteUser(user)"
-                    class="px-2 py-1 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                >
-                    🗑️ Supprimer
-                </button>
-            </td>
-                            </tr>
-                            <tr v-if="!users || users.length === 0">
-                                <td colspan="5" class="p-4 text-center text-slate-400">Aucun utilisateur trouvé.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <!-- SECTION GRAPHIQUES -->
+<div v-if="activeTab === 'dashboard'" class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
 
-            <!-- Carte Graphique Statistique -->
-<div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm mb-6">
-    <div class="flex items-center justify-between mb-6">
+  <!-- 1. CARTE GAUCHE : Répartition des Archives (Donut) -->
+  <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+    <div>
+      <div class="flex items-center justify-between mb-4">
         <div>
-            <h3 class="text-sm font-bold text-slate-800">Répartition des Archives</h3>
-            <p class="text-xs text-slate-400">Volume de dossiers par service municipal</p>
+          <h3 class="text-base font-bold text-slate-800">Répartition des Archives</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Volume de dossiers par service municipal</p>
         </div>
-        <span class="text-xs font-semibold px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg">
-            Dynamique
-        </span>
+        <span class="text-xs font-semibold px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg">Dynamique</span>
+      </div>
+
+      <!-- Graphique Doughnut avec chiffre au centre -->
+      <div class="relative w-44 h-44 mx-auto my-4 flex items-center justify-center">
+        <canvas ref="chartCanvas"></canvas>
+        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span class="text-2xl font-black text-slate-800">{{ dossiers?.length ?? 8 }}</span>
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Dossiers</span>
+        </div>
+      </div>
+
+      <!-- Légende des services (Sous le graphique) -->
+      <div class="grid grid-cols-2 gap-2 mt-4 pt-2 text-[11px]">
+        <div class="flex items-center gap-1.5 text-slate-600">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
+          <span>Finances & Compta</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-slate-600">
+          <span class="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block"></span>
+          <span>Ressources Humaines</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-slate-600">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+          <span>Etat Civil</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-slate-600">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+          <span>Urbanisme</span>
+        </div>
+      </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-        <!-- Graphique (à gauche) -->
-        <div class="md:col-span-1 h-52 relative flex items-center justify-center">
-            <canvas ref="chartCanvas"></canvas>
-            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span class="text-2xl font-bold text-slate-800">{{ dossiers ? dossiers.length : 0 }}</span>
-                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Dossiers</span>
-            </div>
+    <!-- Bas de carte Donut -->
+    <div class="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+      <span>Total des services enregistrés</span>
+      <span class="font-bold text-slate-800">{{ services?.length ?? 4 }} Services</span>
+    </div>
+  </div>
+
+  <!-- 2. CARTE DROITE : Activité d'Archivage (Graphique en Bâtons) -->
+  <div class="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+    <div>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-bold text-slate-800">Activité d'Archivage (2026)</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Entrées de nouveaux dossiers par mois</p>
         </div>
 
-        <!-- LE NOUVEAU  -->
-        <div class="md:col-span-2 space-y-3">
-            <div class="p-4 bg-slate-50/80 rounded-xl border border-slate-100 flex justify-between items-center text-xs transition-all hover:bg-slate-100/50">
-                <div class="flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                    <span class="font-medium text-slate-600">Total des services enregistrés</span>
-                </div>
-                <span class="font-bold text-slate-800 text-sm bg-white px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-xs">{{ services ? services.length : 0 }}</span>
-            </div>
-            
-            <div class="p-4 bg-slate-50/80 rounded-xl border border-slate-100 flex justify-between items-center text-xs transition-all hover:bg-slate-100/50">
-                <div class="flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span class="font-medium text-slate-600">Total des utilisateurs actifs</span>
-                </div>
-                <span class="font-bold text-slate-800 text-sm bg-white px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-xs">{{ users ? users.length : 0 }}</span>
-            </div>
+        <!-- Boutons de filtre de période -->
+        <div class="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
+          <button class="px-3 py-1 bg-white text-slate-800 rounded-lg shadow-sm">Mensuel</button>
+          <button class="px-3 py-1 text-slate-500 hover:text-slate-800">Trimestriel</button>
         </div>
+      </div>
+
+      <!-- Emplacement du graphique en bâtons -->
+      <div class="h-56 relative w-full mt-4">
+        <canvas ref="barChartCanvas"></canvas>
+      </div>
     </div>
+
+    <!-- Bas de carte Activité -->
+    <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+      <div class="flex items-center gap-1 text-emerald-600 font-semibold">
+        <span>📈</span>
+        <span>+12% par rapport au mois dernier</span>
+      </div>
+      <span class="text-slate-400">Mise à jour: Aujourd'hui 10:55</span>
+    </div>
+  </div>
+
 </div>
 
             <!-- Section des Dossiers Globaux avec Recherche & Filtres -->
-<div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm mt-6">
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div>
-            <h2 class="text-base font-bold text-slate-800">Tous les Dossiers d'Archives</h2>
-            <p class="text-xs text-slate-400">Consultez et recherchez parmi l'ensemble des dossiers archivés</p>
-        </div>
+<div v-if="activeTab === 'dashboard' || activeTab === 'dossiers'" class="flex flex-wrap items-center justify-between gap-4 mb-6">
+     <!-- En-tête avec titre et tous les filtres alignés sur la même ligne -->
+  <div>
+    <div>
+      <h2 class="text-base font-bold text-slate-800">Tous les Dossiers d'Archives</h2>
+      <p class="text-xs text-slate-400">Consultez et recherchez parmi l'ensemble des dossiers archivés.</p>
+    </div>
 
-        <div class="flex flex-wrap items-center gap-3">
-            <!-- Sélecteur de Service -->
-            <select 
-                v-model="selectedService" 
-                class="text-xs rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-blue-500 py-2 px-3 text-slate-700 font-medium"
-            >
-                <option value="">Tous les services</option>
-                <option v-for="service in services" :key="service.id" :value="service.id">
-                    {{ service.nom }}
-                </option>
-            </select>
+          <!-- Zone des filtres et actions -->
+    <div class="flex  items-center gap-2">
+      <!-- Select Service -->
+      <div class="relative">
+        <select 
+          v-model="selectedService" 
+          class="text-xs font-medium bg-white border border-slate-300  rounded-lg py-1.5 px-3 text-slate-700 shadow-sm focus:outline-none cursor-pointer"
+        >
+          <option value="">Tous les services</option>
+          <option v-for="service in services" :key="service.id" :value="service.id">{{ service.nom }}</option>
+        </select>
+      </div>
 
-            <!-- Champ de Recherche -->
-            <div class="relative">
-                <input 
-                    type="text" 
-                    v-model="searchQuery" 
-                    placeholder="Rechercher par titre, ref..." 
-                    class="text-xs rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-blue-500 py-2 pl-8 pr-3 w-48 md:w-60 text-slate-700"
-                />
-                <span class="absolute left-2.5 top-2 text-slate-400 text-xs">🔍</span>
-            </div>
-            <!-- Bouton Imprimer / Export PDF -->
-            <button 
-                type="button"
-                @click="window.print()"
-                class="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors inline-flex items-center gap-2 shadow-sm"
-            >
-            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 002-2H5a2 2 0 002 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 0-2-2H9a2 2 0 0-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 0-2-2H7a2 2 0 0-2 2v4h10z" />
-            </svg>
-                Imprimer / Exporter (PDF)
-            </button>
+             <!-- Input Recherche -->
+      <div class="relative">
+        <span class="absolute left-2.5 top-2 text-slate-400 text-xs">🔍</span>
+        <input 
+          v-model="searchQuery" 
+          type="text" 
+          placeholder="Rechercher par titre, ref..." 
+          class="text-xs bg-white border border-slate-300 text-slate-700 rounded-lg py-1.5 pl-7 pr-3 w-36 shadow-sm focus:outline-none"
+        />
+      </div>
+
+      <!-- Bouton Imprimer / Exporter (Style du Modèle) -->
+      <button 
+        @click="exportPDF"
+        class="flex items-center gap-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold text-xs px-3 py-1.5 rounded-lg transition shadow-sm"
+      >
+        <span>🖨️</span>
+        <span>Imprimer / Exporter (PDF)</span>
+      </button>
             <!-- Compteur -->
-            <span class="text-xs font-bold px-2.5 py-1.5 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+            <span class="bg-blue-600 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-xl shadow-sm">
                 {{ filteredDossiers.length }} / {{ dossiers ? dossiers.length : 0 }}
             </span>
         </div>
     </div>
 
-    <!-- Tableau -->
-    <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
-            <thead>
-                <tr class="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase">
-                    <th class="py-3 px-2">Référence / Titre</th>
-                    <th class="py-3 px-2">Service</th>
-                    <th class="py-3 px-2">Boîte</th>
-                    <th class="py-3 px-2">Date d'ouverture</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-50 text-xs">
-                <tr v-for="dossier in filteredDossiers" :key="dossier.id" class="hover:bg-slate-50/80 transition-colors">
+     <!-- Table de Données -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-left border-collapse text-xs">
+      <thead>
+        <tr class="border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px] tracking-wider">
+          <th class="py-3 px-3">TITRE DU DOSSIER</th>
+          <th class="py-3 px-3">RÉFÉRENCE</th>
+          <th class="py-3 px-3">SERVICE</th>
+          <th class="py-3 px-3">BOÎTE / CASIER</th>
+          <th class="py-3 px-3">DATE D'OUVERTURE</th>
+          <th class="py-3 px-3 text-center">VOIR</th>
+        </tr>
+      </thead>
+            <tbody class="divide-y divide-slate-100 text-slate-700">
+                <tr v-for="dossier in filteredDossiers" :key="dossier.id" class="hover:bg-slate-50/80 transition">
 
-  <!-- Référence / Titre -->
-  <td class="py-3 px-2">
-    <p class="font-bold text-slate-800">{{ dossier.titre || dossier.nom }}</p>
-    <p class="text-[10px] text-slate-400 font-mono">{{ dossier.numero_reference || dossier.code }}</p>
-  </td>
+  <!-- 1. Titre du dossier -->
+<td class="py-3 px-3 font-semibold text-slate-800">
+  {{ dossier.titre || 'Sans titre' }}
+</td>
+
+<!-- 2. Référence -->
+<td class="py-3 px-3 text-slate-400 font-mono">
+  {{ dossier.numero_reference || dossier.reference || dossier.code || '-' }}
+</td>
 
   <!-- Service -->
-  <td class="py-3 px-2">
-    <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
-      {{ dossier.service?.nom || dossier.boite?.casier?.service?.nom || 'N/A' }}
-    </span>
-  </td>
+<td class="py-3 px-4">
+  <span 
+    :class="{
+      'bg-emerald-100 text-emerald-800 border border-emerald-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Finances'),
+      'bg-purple-100 text-purple-800 border border-purple-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Ressources'),
+      'bg-amber-100 text-amber-800 border border-amber-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Civil'),
+      'bg-blue-100 text-blue-800 border border-blue-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Urbanisme')
+    }"
+    class="px-2.5 py-1 rounded-lg text-[11px] font-semibold inline-block bg-slate-100 text-slate-700"
+  >
+    {{ dossier.service?.nom || dossier.boite?.casier?.service?.nom || 'N/A' }}
+  </span>
+</td>
 
   <!-- Boîte -->
-  <td class="py-3 px-2 font-medium text-slate-600">
+  <td class="py-3 px-4 text-slate-700 font-medium">
   <template v-if="dossier.boite">
     <span v-if="dossier.boite.casier && dossier.boite.nom !== dossier.boite.casier.nom">
       {{ dossier.boite.casier.nom }} — {{ dossier.boite.nom || dossier.boite.numero_boite || dossier.boite.numero || dossier.boite.code }}
@@ -532,13 +861,27 @@ const formatDate = (dateString) => {
 </td>
 
   <!-- Date -->
-  <td class="py-3 px-2 text-slate-500">
+  <td class="py-3 px-3 text-slate-500 font-medium">
     {{ formatDate(dossier.created_at || dossier.date_ouverture) }}
   </td>
 
+  <!-- 6. Action Voir -->
+<td class="py-3 px-4 text-center">
+  <button 
+    @click="openDossier(dossier)" 
+    class="text-blue-600 hover:text-blue-800 font-bold p-1"
+    title="Voir le dossier"
+  >
+    <svg class="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  </button>
+</td>
+
 </tr>
                 <tr v-if="!filteredDossiers.length">
-                    <td colspan="4" class="py-8 text-center text-slate-400 text-xs">
+                    <td colspan="6" class="py-8 text-center text-slate-400 text-xs">
                         Aucun dossier ne correspond à votre recherche.
                     </td>
                 </tr>
@@ -570,7 +913,181 @@ const formatDate = (dateString) => {
 </div>
     </div>
 </div>
+
+       <div v-if="activeTab === 'logs'" class="space-y-6">
+
+  <!-- 1. BANNIÈRE SUPÉRIEURE -->
+  <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <h3 class="text-2xl font-bold text-slate-800 tracking-tight">Historique des Activités Récentes</h3>
+      <p class="text-sm text-slate-400 mt-1">Journal de suivi des actions effectuées par les utilisateurs du système.</p>
+      <div class="mt-3">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100/60">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {{ logs ? logs.length : 0 }} action(s) récente(s)
+        </span>
+      </div>
+    </div>
+    <button @click="refreshLogs" class="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-2xl transition">
+      <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Actualiser le journal
+    </button>
+  </div>
+
+  <!-- 2. CARTES KPI (STATISTIQUES) -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Carte 1 : Total -->
+    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between">
+      <div>
+        <p class="text-xs font-bold tracking-wider text-slate-400 uppercase">Total des événements</p>
+        <h4 class="text-3xl font-extrabold text-slate-800 mt-2">{{ logs ? logs.length : 0 }}</h4>
+        <p class="text-xs text-slate-400 mt-1">Journal de traçabilité</p>
+      </div>
+      <div class="p-3.5 bg-blue-50 rounded-2xl text-blue-600">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+      </div>
+    </div>
+
+    <!-- Carte 2 : Créations -->
+    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between">
+      <div>
+        <p class="text-xs font-bold tracking-wider text-slate-400 uppercase">Créations & Ajouts</p>
+        <h4 class="text-3xl font-extrabold text-slate-800 mt-2">
+          {{ logs ? logs.filter(l => l.action && l.action.toLowerCase().includes('création')).length : 0 }}
+        </h4>
+        <p class="text-xs text-emerald-600 font-semibold mt-1 flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Nouveaux dossiers
+        </p>
+      </div>
+      <div class="p-3.5 bg-emerald-50 rounded-2xl text-emerald-600">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      </div>
+    </div>
+
+    <!-- Carte 3 : Dernière Connexion -->
+    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between">
+      <div>
+        <p class="text-xs font-bold tracking-wider text-slate-400 uppercase">Dernière connexion</p>
+        <h4 class="text-xl font-bold text-slate-800 mt-2">Aujourd'hui</h4>
+        <p class="text-xs text-purple-600 font-semibold mt-1 flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          IP: 127.0.0.1
+        </p>
+      </div>
+      <div class="p-3.5 bg-purple-50 rounded-2xl text-purple-600">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. BARRE DE RECHERCHE ET FILTRE -->
+  <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="relative w-full md:w-96">
+      <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      </span>
+      <input 
+        v-model="logSearchQuery" 
+        type="text" 
+        placeholder="Rechercher par utilisateur, description, IP..." 
+        class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+      />
+    </div>
+
+    <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+      <select v-model="actionFilter" class="bg-slate-50 border border-slate-200/80 rounded-2xl px-4 py-2.5 text-xs text-slate-600 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+        <option value="">Toutes les actions</option>
+        <option value="Création Dossier">Création Dossier</option>
+        <option value="Connexion">Connexion</option>
+        <option value="Modification">Modification</option>
+        <option value="Suppression">Suppression</option>
+      </select>
+
+      <span class="px-4 py-2.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-2xl">
+        {{ filteredLogs.length }} sur {{ logs ? logs.length : 0 }} enregistrements
+      </span>
+    </div>
+  </div>
+
+  <!-- 4. TABLEAU DU JOURNAL -->
+  <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="border-b border-slate-100 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider bg-slate-50/50">
+            <th class="py-4 px-6">UTILISATEUR</th>
+            <th class="py-4 px-6">ACTION</th>
+            <th class="py-4 px-6">DÉTAILS / DESCRIPTION</th>
+            <th class="py-4 px-6">ADRESSE IP</th>
+            <th class="py-4 px-6 text-right">DATE & HEURE</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-xs">
+          <tr v-for="log in filteredLogs" :key="log.id" class="hover:bg-slate-50/60 transition">
+            <!-- Utilisateur avec l'icône -->
+            <td class="py-4 px-6 font-medium text-slate-700">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                <span>{{ log.user_email || log.user?.email || 'admin@maharanga.mg' }}</span>
+              </div>
+            </td>
+            
+            <!-- Badge d'action -->
+            <td class="py-4 px-6">
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-bold" :class="getActionBadgeStyle(log.action)">
+                {{ log.action }}
+              </span>
+            </td>
+
+            <!-- Description -->
+            <td class="py-4 px-6 text-slate-800 font-medium">
+              {{ log.description || log.details }}
+            </td>
+
+            <!-- IP -->
+            <td class="py-4 px-6 font-mono text-slate-400">
+              {{ log.ip_address || log.ip || '127.0.0.1' }}
+            </td>
+
+            <!-- Date -->
+            <td class="py-4 px-6 text-right text-slate-500 whitespace-nowrap">
+              {{ formatDate(log.created_at) }}
+            </td>
+          </tr>
+
+          <!-- Message si aucun log -->
+          <tr v-if="!filteredLogs || filteredLogs.length === 0">
+            <td colspan="5" class="py-8 text-center text-slate-400 font-medium">
+              Aucune activité enregistrée.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 5. PAGINATION (Pied du tableau) -->
+    <div class="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+      <span>Affichage de {{ filteredLogs.length }} action(s)</span>
+      <div class="flex items-center gap-2">
+        <button disabled class="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-400 bg-white cursor-not-allowed opacity-60">
+          Précédent
+        </button>
+        <button class="px-3 py-1.5 rounded-xl bg-blue-600 text-white font-bold shadow-sm">
+          1
+        </button>
+        <button disabled class="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-400 bg-white cursor-not-allowed opacity-60">
+          Suivant
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
         </main>
+        </main>
+        
 
         <!-- Fenêtre Modale de Création de Compte -->
         <div v-if="showModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -737,15 +1254,19 @@ const formatDate = (dateString) => {
             </div>
 
             <div class="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div>
-                    <p class="text-xs font-bold text-slate-400 uppercase">Service originel</p>
-                    <p class="text-sm font-semibold text-slate-700">{{ selectedDossier.boite?.service?.nom || 'N/A' }}</p>
-                </div>
-                <div>
-                    <p class="text-xs font-bold text-slate-400 uppercase">Numéro de Boîte</p>
-                    <p class="text-sm font-semibold text-slate-700">{{ selectedDossier.boite?.numero || 'N/A' }}</p>
-                </div>
-            </div>
+  <div>
+    <p class="text-xs font-bold text-slate-400 uppercase">Service originel</p>
+    <p class="text-sm font-semibold text-slate-700">
+      {{ selectedDossier?.service?.nom || selectedDossier?.service_nom || selectedDossier?.boite?.casier?.service?.nom || 'N/A' }}
+    </p>
+  </div>
+  <div>
+    <p class="text-xs font-bold text-slate-400 uppercase">Numéro de Boîte</p>
+    <p class="text-sm font-semibold text-slate-700">
+      {{ selectedDossier?.boite?.nom || selectedDossier?.boite?.numero || selectedDossier?.boite_nom || 'N/A' }}
+    </p>
+  </div>
+</div>
 
             <div>
                 <p class="text-xs font-bold text-slate-400 uppercase mb-1">Description / Contenu</p>
@@ -808,7 +1329,7 @@ const formatDate = (dateString) => {
                     class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                     <option value="" disabled>Sélectionner un service</option>
-                    <option v-for="service in props.services" :key="service.id" :value="service.id">
+                    <option v-for="service in services" :key="service.id" :value="service.id">
                         {{ service.nom }}
                     </option>
                 </select>
@@ -833,6 +1354,6 @@ const formatDate = (dateString) => {
             </div>
         </form>
     </div>
+    
 </div>
-
 </template>
