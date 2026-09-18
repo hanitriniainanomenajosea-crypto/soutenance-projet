@@ -14,11 +14,11 @@ class DossierController extends Controller
     $user = auth()->user();
 
     $dossiers = Dossier::whereHas('boite.casier', function ($query) use ($user) {
-        $query->where('service_id', $user->service_id);
-    })
-    ->with('boite')
-    ->latest()
-    ->paginate(10);
+    $query->where('service_id', $user->service_id);
+})
+->with(['boite.casier']) // <-- MODIFICATION ICI : charger la boîte ET son casier
+->latest()
+->paginate(10);
 
     $boites = Boite::whereHas('casier', function ($query) use ($user) {
         $query->where('service_id', $user->service_id);

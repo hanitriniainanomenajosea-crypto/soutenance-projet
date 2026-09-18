@@ -3,6 +3,7 @@ import { onMounted, ref, computed, watch, nextTick } from 'vue';
 import { useForm, usePage, Head, Link, router } from '@inertiajs/vue3';
 import { Chart, registerables } from 'chart.js';
 import Sidebar from '@/Components/Sidebar.vue';
+import html2pdf  from 'html2pdf.js';
 const isCollapsed = ref(false)
 
 const props = defineProps({
@@ -162,37 +163,51 @@ const barChartCanvas = ref(null);
 let barChartInstance = null;
 // Données calculées
 const chartData = computed(() => {
-    const servicesCount = {};
-    
-    const list = props.dossiers || [];
-    if (list.length > 0) {
-        list.forEach(dossier => {
-            const serviceNom = dossier.boite?.service?.nom || 'Non assigné';
-            servicesCount[serviceNom] = (servicesCount[serviceNom] || 0) + 1;
-        });
-    } else {
-        servicesCount['Aucune donnée'] = 1;
-    }
+  // Les couleurs exactes dans l'ordre de votre légende (Bleu, Violet, Jaune, Vert)
+  const palette = ['#3b82f6', '#8b5cf6', '#eab308', '#10b981']; 
 
-    return {
-        labels: Object.keys(servicesCount),
-        datasets: [{
-            label: 'Nombre de dossiers',
-            data: Object.values(servicesCount),
-            backgroundColor: [
-                '#3b82f6', '#10b981', '#f59e0b', '#ef4444', 
-                '#8b5cf6', '#ec4899', '#06b6d4', '#64748b'
-            ],
-            borderWidth: 0,
-            hoverOffset: 6
-        }]
-    };
+  const labels = [];
+  const data = [];
+  const backgroundColors = [];
+
+  // On parcourt les services dans leur ordre officiel
+  if (props.services && props.services.length > 0) {
+    props.services.forEach((service, index) => {
+      // 1. Ajouter le nom exact du service
+      labels.push(service.nom);
+      
+      // 2. Assigner la couleur dans le même ordre que la légende
+      backgroundColors.push(palette[index % palette.length]);
+
+      // 3. Compter les dossiers pour CE service précis
+      const count = (props.dossiers || []).filter(dossier => {
+        const serviceNom = dossier.boite?.casier?.service?.nom 
+                        || dossier.service?.nom 
+                        || dossier.boite?.service?.nom;
+        return serviceNom === service.nom;
+      }).length;
+
+      data.push(count);
+    });
+  }
+
+  return {
+    labels: labels,
+    datasets: [{
+      label: 'Nombre de dossiers',
+      data: data,
+      backgroundColor: backgroundColors,
+      borderWidth: 0,
+      hoverOffset: 6
+    }]
+  };
 });
 const activeTab = ref('dashboard')
 
+
+
 const renderChart = async () => {
   await nextTick();
-  
   setTimeout(() => {
     if (!chartCanvas.value) return;
     const ctx = chartCanvas.value.getContext('2d');
@@ -209,9 +224,7 @@ const renderChart = async () => {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: {
-            display: false
-          }
+          legend: { display: false }
         },
         cutout: '75%'
       }
@@ -249,7 +262,7 @@ const formatDate = (dateString) => {
     minute: '2-digit'
   });
 };
-// À insérer vers la ligne 212 (juste après formatDate):
+
 const getActionBadgeStyle = (action) => {
   if (!action) return 'bg-slate-100 text-slate-600';
   const act = action.toLowerCase();
@@ -270,6 +283,21 @@ const refreshLogs = () => {
   router.reload({ only: ['logs'] });
 };
 
+const period = ref('mensuel');
+
+const barChartData = computed(() => {
+  if (period.value === 'trimestriel') {
+    return {
+      labels: ['T1 (Jan-Mar)', 'T2 (Avr-Juin)', 'T3 (Juil-Sept)', 'T4 (Oct-Déc)'],
+      data: [30, 45, 48, props.dossiers?.length || 11]
+    };
+  }
+  return {
+    labels: ['Mai', 'Juin', 'Juil', 'Août', 'Sept (En cours)'],
+    data: [12, 19, 14, 22, props.dossiers?.length || 8]
+  };
+});
+
 const renderBarChart = async () => {
   await nextTick();
   if (!barChartCanvas.value) return;
@@ -282,10 +310,10 @@ const renderBarChart = async () => {
   barChartInstance = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: ['Mai', 'Juin', 'Juil', 'Août', 'Sept (En cours)'],
+      labels: barChartData.value.labels, // Utilise les labels dynamiques
       datasets: [{
         label: 'Entrées',
-        data: [12, 19, 14, 22, props.dossiers?.length || 8],
+        data: barChartData.value.data,     // Utilise les données dynamiques
         backgroundColor: '#3b82f6',
         borderRadius: 6,
         barThickness: 22,
@@ -305,14 +333,34 @@ const renderBarChart = async () => {
         },
         y: {
           min: 0,
-          max: 25,
-          ticks: { stepSize: 5, color: '#94a3b8', font: { size: 11 } },
+          max: 50,
+          ticks: { stepSize: 10, color: '#94a3b8', font: { size: 11 } },
           grid: { color: '#f1f5f9' }
         }
       }
     }
   });
 };
+const exportPDF = async () => {
+  const element = document.getElementById('pdf-content')
+  if (!element) return
+
+  const container = element.parentElement
+  container.style.display = 'block'
+
+  const options = {
+    margin:       [10, 10, 10, 10],
+    filename:     `Fiche_Archive_${selectedDossier.value?.reference || 'dossier'}.pdf`,
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, logging: false, useCORS: true },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak:    { mode: 'avoid-all' }
+  }
+
+  await html2pdf().set(options).from(element).save()
+
+  container.style.display = 'none'
+}
 </script>
 
 <template>
@@ -323,10 +371,10 @@ const renderBarChart = async () => {
     v-model:activeTab="activeTab"
     />
 
-    <main :class="['flex-1 transition-all duration-300 py-8 px-6 space-y-8', isCollapsed ? 'ml-20' : 'ml-64']">
+    <main :class="['flex-1 transition-all duration-300 pt-2 pb-8 px-6 space-y-6', isCollapsed ? 'ml-20' : 'ml-64']">
         
         <!-- Barre de Navigation Supérieure -->
-        <nav class="flex justify-end items-center mb-6 relative z-50 ">
+        <nav class="flex justify-end items-center mb-1 relative z-50 ">
 
 
     <!-- Droite : Menu Déroulant Profil -->
@@ -422,12 +470,11 @@ const renderBarChart = async () => {
         </div>
         </nav>
 
-       
         <!-- Contenu Principal -->
-        <main class="max-w-7xl mx-auto py-8 px-6 space-y-8">
+        <main class="flex-1 w-full p-8 pt-1 space-y-6">
             
             <!-- Bandeau de Bienvenue -->
-            <div v-if="activeTab === 'dashboard'" class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 ">
+            <div v-if="activeTab === 'dashboard'" class="bg-white p-10 mt-1 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-start">
                 <div>
                     <h2 class="text-2xl font-bold text-slate-800">Tableau de Bord Global</h2>
                     <p class="text-slate-500 text-sm mt-1">Supervision de l'ensemble des services, utilisateurs et archives.</p>
@@ -437,10 +484,8 @@ const renderBarChart = async () => {
                     Système actif
                 </span>
             </div>
-
-
             
-
+            
             <!-- 1. CARTES DE STATISTIQUES -->
     <div  v-if="activeTab === 'dashboard'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       
@@ -514,10 +559,6 @@ const renderBarChart = async () => {
         {{ users?.length || 0 }} comptes actifs
       </span>
     </div>
-    <button @click="openCreateUserModal" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl transition shadow-sm self-start md:self-auto">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
-      Nouveau Compte
-    </button>
   </div>
 
   <!-- 2. CARTES STATISTIQUES (Total, Agents, Admins) -->
@@ -639,15 +680,32 @@ const renderBarChart = async () => {
 
             <!-- Actions -->
             <td class="py-4 px-6 text-right">
-              <div class="flex items-center justify-end gap-2">
-                <button type="button" @click="openEditUser(user)" class="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-xs rounded-lg transition border border-amber-200/50">
-                  ✏️ Modifier
-                </button>
-                <button type="button" @click="deleteUser(user)" class="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-xs rounded-lg transition border border-rose-200/50">
-                  🗑️ Supprimer
-                </button>
-              </div>
-            </td>
+  <div class="flex items-center justify-end gap-2">
+    <!-- Bouton Modifier -->
+    <button 
+      type="button" 
+      @click="openEditUser(user)" 
+      class="p-2 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-xl transition border border-amber-200/60 shadow-sm"
+      title="Modifier"
+    >
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+      </svg>
+    </button>
+
+    <!-- Bouton Supprimer -->
+    <button 
+      type="button" 
+      @click="deleteUser(user)" 
+      class="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition border border-rose-200/60 shadow-sm"
+      title="Supprimer"
+    >
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+      </svg>
+    </button>
+  </div>
+</td>
           </tr>
 
           <!-- Si aucun utilisateur n'est trouvé -->
@@ -696,25 +754,20 @@ const renderBarChart = async () => {
         </div>
       </div>
 
-      <!-- Légende des services (Sous le graphique) -->
-      <div class="grid grid-cols-2 gap-2 mt-4 pt-2 text-[11px]">
-        <div class="flex items-center gap-1.5 text-slate-600">
-          <span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
-          <span>Finances & Compta</span>
-        </div>
-        <div class="flex items-center gap-1.5 text-slate-600">
-          <span class="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block"></span>
-          <span>Ressources Humaines</span>
-        </div>
-        <div class="flex items-center gap-1.5 text-slate-600">
-          <span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
-          <span>Etat Civil</span>
-        </div>
-        <div class="flex items-center gap-1.5 text-slate-600">
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-          <span>Urbanisme</span>
-        </div>
-      </div>
+      <!-- Légende des services dynamique -->
+<div class="grid grid-cols-2 gap-2 mt-4 pt-2 text-[11px]">
+  <div 
+    v-for="(label, index) in chartData.labels" 
+    :key="label" 
+    class="flex items-center gap-1.5 text-slate-600"
+  >
+    <span 
+      class="w-2.5 h-2.5 rounded-full inline-block shrink-0" 
+      :style="{ backgroundColor: chartData.datasets[0]?.backgroundColor[index] }"
+    ></span>
+    <span class="truncate">{{ label }}</span>
+  </div>
+</div>
     </div>
 
     <!-- Bas de carte Donut -->
@@ -725,194 +778,215 @@ const renderBarChart = async () => {
   </div>
 
   <!-- 2. CARTE DROITE : Activité d'Archivage (Graphique en Bâtons) -->
-  <div class="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
-    <div>
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <h3 class="text-base font-bold text-slate-800">Activité d'Archivage (2026)</h3>
-          <p class="text-xs text-slate-400 mt-0.5">Entrées de nouveaux dossiers par mois</p>
-        </div>
-
-        <!-- Boutons de filtre de période -->
-        <div class="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
-          <button class="px-3 py-1 bg-white text-slate-800 rounded-lg shadow-sm">Mensuel</button>
-          <button class="px-3 py-1 text-slate-500 hover:text-slate-800">Trimestriel</button>
-        </div>
+<div class="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+  <div>
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-base font-bold text-slate-800">Activité d'Archivage (2026)</h3>
+        <p class="text-xs text-slate-400 mt-0.5">
+          {{ period === 'mensuel' ? 'Entrées de nouveaux dossiers par mois' : 'Entrées de nouveaux dossiers par trimestre' }}
+        </p>
       </div>
 
-      <!-- Emplacement du graphique en bâtons -->
-      <div class="h-56 relative w-full mt-4">
-        <canvas ref="barChartCanvas"></canvas>
+      <!-- Boutons de filtre de période dynamiques -->
+      <div class="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
+        <button 
+          @click="period = 'mensuel'; renderBarChart()" 
+          :class="period === 'mensuel' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+          class="px-3 py-1 rounded-lg transition-all"
+        >
+          Mensuel
+        </button>
+        <button 
+          @click="period = 'trimestriel'; renderBarChart()" 
+          :class="period === 'trimestriel' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+          class="px-3 py-1 rounded-lg transition-all"
+        >
+          Trimestriel
+        </button>
       </div>
     </div>
 
-    <!-- Bas de carte Activité -->
-    <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
-      <div class="flex items-center gap-1 text-emerald-600 font-semibold">
-        <span>📈</span>
-        <span>+12% par rapport au mois dernier</span>
-      </div>
-      <span class="text-slate-400">Mise à jour: Aujourd'hui 10:55</span>
+    <!-- Emplacement du graphique en bâtons -->
+    <div class="h-56 relative w-full mt-4">
+      <canvas ref="barChartCanvas"></canvas>
     </div>
   </div>
 
+  <!-- Bas de carte Activité -->
+  <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+    <div class="flex items-center gap-1 text-emerald-600 font-semibold">
+      <span>📈</span>
+      <span>+12% par rapport au mois dernier</span>
+    </div>
+    <span class="text-slate-400">Mise à jour: Aujourd'hui 10:55</span>
+  </div>
 </div>
 
-            <!-- Section des Dossiers Globaux avec Recherche & Filtres -->
-<div v-if="activeTab === 'dashboard' || activeTab === 'dossiers'" class="flex flex-wrap items-center justify-between gap-4 mb-6">
-     <!-- En-tête avec titre et tous les filtres alignés sur la même ligne -->
-  <div>
-    <div>
-      <h2 class="text-base font-bold text-slate-800">Tous les Dossiers d'Archives</h2>
-      <p class="text-xs text-slate-400">Consultez et recherchez parmi l'ensemble des dossiers archivés.</p>
-    </div>
+</div>
 
-          <!-- Zone des filtres et actions -->
-    <div class="flex  items-center gap-2">
-      <!-- Select Service -->
-      <div class="relative">
-        <select 
-          v-model="selectedService" 
-          class="text-xs font-medium bg-white border border-slate-300  rounded-lg py-1.5 px-3 text-slate-700 shadow-sm focus:outline-none cursor-pointer"
-        >
-          <option value="">Tous les services</option>
-          <option v-for="service in services" :key="service.id" :value="service.id">{{ service.nom }}</option>
-        </select>
-      </div>
-
-             <!-- Input Recherche -->
-      <div class="relative">
-        <span class="absolute left-2.5 top-2 text-slate-400 text-xs">🔍</span>
-        <input 
-          v-model="searchQuery" 
-          type="text" 
-          placeholder="Rechercher par titre, ref..." 
-          class="text-xs bg-white border border-slate-300 text-slate-700 rounded-lg py-1.5 pl-7 pr-3 w-36 shadow-sm focus:outline-none"
-        />
-      </div>
-
-      <!-- Bouton Imprimer / Exporter (Style du Modèle) -->
-      <button 
-        @click="exportPDF"
-        class="flex items-center gap-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold text-xs px-3 py-1.5 rounded-lg transition shadow-sm"
-      >
-        <span>🖨️</span>
-        <span>Imprimer / Exporter (PDF)</span>
-      </button>
-            <!-- Compteur -->
-            <span class="bg-blue-600 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-xl shadow-sm">
-                {{ filteredDossiers.length }} / {{ dossiers ? dossiers.length : 0 }}
-            </span>
+            <!-- 1. En-tête avec Filtres et Recherche -->
+    <div 
+      v-if="activeTab === 'dashboard' || activeTab === 'dossiers'" 
+      class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col"
+    >
+      <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold text-slate-800">Tous les Dossiers d'Archives</h2>
+          <p class="text-xs text-slate-400">Consultez et recherchez parmi l'ensemble des dossiers archivés.</p>
         </div>
-    </div>
 
-     <!-- Table de Données -->
-  <div class="overflow-x-auto">
-    <table class="w-full text-left border-collapse text-xs">
-      <thead>
-        <tr class="border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px] tracking-wider">
-          <th class="py-3 px-3">TITRE DU DOSSIER</th>
-          <th class="py-3 px-3">RÉFÉRENCE</th>
-          <th class="py-3 px-3">SERVICE</th>
-          <th class="py-3 px-3">BOÎTE / CASIER</th>
-          <th class="py-3 px-3">DATE D'OUVERTURE</th>
-          <th class="py-3 px-3 text-center">VOIR</th>
-        </tr>
-      </thead>
-            <tbody class="divide-y divide-slate-100 text-slate-700">
-                <tr v-for="dossier in filteredDossiers" :key="dossier.id" class="hover:bg-slate-50/80 transition">
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Select Filtre Service -->
+          <select 
+            v-model="selectedService" 
+            class="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="">Tous les services</option>
+            <option v-for="service in services" :key="service.id" :value="service.nom">
+              {{ service.nom }}
+            </option>
+          </select>
 
-  <!-- 1. Titre du dossier -->
-<td class="py-3 px-3 font-semibold text-slate-800">
-  {{ dossier.titre || 'Sans titre' }}
-</td>
+          <!-- Input Recherche -->
+          <div class="relative">
+            <input 
+              v-model="searchQuery" 
+              type="text" 
+              placeholder="Rechercher par titre..." 
+              class="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-48 focus:w-64 transition-all"
+            />
+            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
 
-<!-- 2. Référence -->
-<td class="py-3 px-3 text-slate-400 font-mono">
-  {{ dossier.numero_reference || dossier.reference || dossier.code || '-' }}
-</td>
+          <!-- Bouton Imprimer / Compteur -->
+          <button 
+            @click="exportPDF" 
+            class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-2 transition"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+            </svg>
+            Imprimer / Exporter (PDF)
+          </button>
+          
+          <span class="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold">
+            {{ filteredDossiers.length }} / {{ dossiers.length }}
+          </span>
+        </div>
+      </div>
 
-  <!-- Service -->
-<td class="py-3 px-4">
-  <span 
-    :class="{
-      'bg-emerald-100 text-emerald-800 border border-emerald-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Finances'),
-      'bg-purple-100 text-purple-800 border border-purple-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Ressources'),
-      'bg-amber-100 text-amber-800 border border-amber-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Civil'),
-      'bg-blue-100 text-blue-800 border border-blue-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom)?.includes('Urbanisme')
-    }"
-    class="px-2.5 py-1 rounded-lg text-[11px] font-semibold inline-block bg-slate-100 text-slate-700"
-  >
-    {{ dossier.service?.nom || dossier.boite?.casier?.service?.nom || 'N/A' }}
-  </span>
-</td>
+      <!-- 2. Table de Données -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px] tracking-wider bg-slate-50/50">
+              <th class="py-3.5 px-4">TITRE DU DOSSIER</th>
+              <th class="py-3.5 px-4">RÉFÉRENCE</th>
+              <th class="py-3.5 px-4">SERVICE</th>
+              <th class="py-3.5 px-4">BOÎTE / CASIER</th>
+              <th class="py-3.5 px-4">DATE D'OUVERTURE</th>
+              <th class="py-3.5 px-4 text-center">VOIR</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-slate-700">
+            <tr v-for="dossier in filteredDossiers" :key="dossier.id" class="hover:bg-slate-50/80 transition">
+              
+              <!-- 1. Titre -->
+              <td class="py-3.5 px-4 font-semibold text-slate-800">
+                {{ dossier.titre || 'Sans titre' }}
+              </td>
 
-  <!-- Boîte -->
-  <td class="py-3 px-4 text-slate-700 font-medium">
-  <template v-if="dossier.boite">
-    <span v-if="dossier.boite.casier && dossier.boite.nom !== dossier.boite.casier.nom">
-      {{ dossier.boite.casier.nom }} — {{ dossier.boite.nom || dossier.boite.numero_boite || dossier.boite.numero || dossier.boite.code }}
-    </span>
-    <span v-else>
-      {{ dossier.boite.casier?.nom || dossier.boite.nom || dossier.boite.numero_boite || dossier.boite.numero || dossier.boite.code }}
-    </span>
-  </template>
-  <template v-else>N/A</template>
-</td>
+              <!-- 2. Référence -->
+              <td class="py-3.5 px-4 text-slate-400 font-mono">
+                {{ dossier.numero_reference || dossier.reference || dossier.code || '-' }}
+              </td>
 
-  <!-- Date -->
-  <td class="py-3 px-3 text-slate-500 font-medium">
-    {{ formatDate(dossier.created_at || dossier.date_ouverture) }}
-  </td>
+              <!-- 3. Service -->
+              <td class="py-3.5 px-4">
+                <span
+                  :class="{
+                    'bg-emerald-100 text-emerald-800 border border-emerald-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom) === 'Service Finances et Comptabilité',
+                    'bg-purple-100 text-purple-800 border border-purple-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom) === 'Service Ressources Humaines',
+                    'bg-amber-100 text-amber-800 border border-amber-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom) === 'Service État Civil',
+                    'bg-blue-100 text-blue-800 border border-blue-200': (dossier.service?.nom || dossier.boite?.casier?.service?.nom) === 'Service Urbanisme et Foncier'
+                  }"
+                  class="px-2.5 py-1 rounded-lg text-[11px] font-semibold inline-block bg-slate-100 text-slate-700"
+                >
+                  {{ dossier.service?.nom || dossier.boite?.casier?.service?.nom || 'N/A' }}
+                </span>
+              </td>
 
-  <!-- 6. Action Voir -->
-<td class="py-3 px-4 text-center">
-  <button 
-    @click="openDossier(dossier)" 
-    class="text-blue-600 hover:text-blue-800 font-bold p-1"
-    title="Voir le dossier"
-  >
-    <svg class="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-    </svg>
-  </button>
-</td>
+              <!-- 4. Boîte / Casier -->
+              <td class="py-3.5 px-4 text-slate-700 font-medium">
+                <template v-if="dossier.boite">
+                  <span v-if="dossier.boite.casier && dossier.boite.nom != dossier.boite.casier.nom">
+                    {{ dossier.boite.casier.nom }} — {{ dossier.boite.nom || dossier.boite.numero_boite || dossier.boite.numero || 'Boîte' }}
+                  </span>
+                  <span v-else>
+                    {{ dossier.boite.casier?.nom || dossier.boite.nom || dossier.boite.numero_boite || dossier.boite.numero || 'Boîte' }}
+                  </span>
+                </template>
+                <template v-else>N/A</template>
+              </td>
 
-</tr>
-                <tr v-if="!filteredDossiers.length">
-                    <td colspan="6" class="py-8 text-center text-slate-400 text-xs">
-                        Aucun dossier ne correspond à votre recherche.
-                    </td>
-                </tr>
-            </tbody>
+              <!-- 5. Date d'ouverture -->
+              <td class="py-3.5 px-4 text-slate-500 font-medium">
+                {{ formatDate(dossier.created_at || dossier.date_ouverture) }}
+              </td>
+
+              <!-- 6. Action Voir -->
+              <td class="py-3.5 px-4 text-center">
+                <button
+                  @click="openDossier(dossier)"
+                  class="text-blue-600 hover:text-blue-800 font-bold p-1"
+                  title="Voir le dossier"
+                >
+                  <svg class="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </button>
+              </td>
+            </tr>
+
+            <!-- Message en cas de résultat vide -->
+            <tr v-if="!filteredDossiers.length">
+              <td colspan="6" class="py-12 text-center text-slate-400 text-xs font-medium">
+                Aucun dossier ne correspond à votre recherche.
+              </td>
+            </tr>
+          </tbody>
         </table>
-        <!-- Pagination des Dossiers -->
-<div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-    <span>
-        Affichage de <strong class="font-semibold text-slate-700">{{ filteredDossiers.length }}</strong> dossier(s)
-    </span>
-    
-    <div class="flex items-center gap-2">
-        <button 
+      </div>
+
+      <!-- 3. Pagination des Dossiers -->
+      <div class="px-6 py-3.5 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+        <span>
+          Affichage de <strong class="font-semibold text-slate-700">{{ filteredDossiers.length }}</strong> dossier(s)
+        </span>
+
+        <div class="flex items-center gap-2">
+          <button
             type="button"
             disabled
             class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-400 cursor-not-allowed opacity-60"
-        >
+          >
             Précédent
-        </button>
-        <span class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold">1</span>
-        <button 
+          </button>
+          <span class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold">1</span>
+          <button
             type="button"
             disabled
             class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-400 cursor-not-allowed opacity-60"
-        >
+          >
             Suivant
-        </button>
+          </button>
+        </div>
+      </div>
     </div>
-</div>
-    </div>
-</div>
 
        <div v-if="activeTab === 'logs'" class="space-y-6">
 
@@ -1019,7 +1093,7 @@ const renderBarChart = async () => {
             <th class="py-4 px-6">UTILISATEUR</th>
             <th class="py-4 px-6">ACTION</th>
             <th class="py-4 px-6">DÉTAILS / DESCRIPTION</th>
-            <th class="py-4 px-6">ADRESSE IP</th>
+            <th class="py-4 px-6">SERVICE</th>
             <th class="py-4 px-6 text-right">DATE & HEURE</th>
           </tr>
         </thead>
@@ -1045,10 +1119,12 @@ const renderBarChart = async () => {
               {{ log.description || log.details }}
             </td>
 
-            <!-- IP -->
-            <td class="py-4 px-6 font-mono text-slate-400">
-              {{ log.ip_address || log.ip || '127.0.0.1' }}
-            </td>
+            <!-- Service -->
+            <td class="py-3.5 px-4">
+  <span class="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg font-medium text-[11px]">
+    {{ log.user?.service?.nom || log.service_name || log.service || 'Non assigné' }}
+  </span>
+</td>
 
             <!-- Date -->
             <td class="py-4 px-6 text-right text-slate-500 whitespace-nowrap">
@@ -1088,61 +1164,72 @@ const renderBarChart = async () => {
         </main>
         </main>
         
-
         <!-- Fenêtre Modale de Création de Compte -->
-        <div v-if="showModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-                <div class="flex justify-between items-center border-b pb-3">
-                    <h3 class="text-lg font-bold text-slate-900">Nouveau Compte</h3>
-                    <button @click="showModal = false" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
-                </div>
-                
-                <form @submit.prevent="submit" class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Nom Complet</label>
-                        <input v-model="form.name" type="text" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Adresse Email</label>
-                        <input v-model="form.email" type="email" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Mot de Passe</label>
-                        <input v-model="form.password" type="password" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Rôle</label>
-                        <select v-model="form.role" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                            <option value="agent">Agent de service</option>
-                            <option value="admin">Administrateur</option>
-                        </select>
-                    </div>
-
-                    <div v-if="form.role === 'agent'">
-                        <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Service Attribué</label>
-                        <select v-model="form.service_id" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required>
-                            <option value="" disabled>Sélectionner un service</option>
-                            <option v-for="service in services" :key="service.id" :value="service.id">
-                                {{ service.nom }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <div class="flex justify-end space-x-3 pt-4 border-t">
-                        <button type="button" @click="showModal = false" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800">
-                            Annuler
-                        </button>
-                        <button :disabled="form.processing" type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition">
-                            Créer le compte
-                        </button>
-                    </div>
-                </form>
-            </div>
+<div v-if="showModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+        <div class="flex justify-between items-center border-b pb-3">
+            <h3 class="text-lg font-bold text-slate-900">Nouveau Compte</h3>
+            <button type="button" @click="showModal = false" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
         </div>
+        
+        <form @submit.prevent="submit" class="space-y-4">
+            <!-- Nom Complet -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Nom Complet</label>
+                <input v-model="form.name" type="text" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                <p v-if="form.errors?.name" class="text-red-500 text-xs mt-1">{{ form.errors.name }}</p>
+            </div>
+
+            <!-- Adresse Email -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Adresse Email</label>
+                <input v-model="form.email" type="email" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                <p v-if="form.errors?.email" class="text-red-500 text-xs mt-1">{{ form.errors.email }}</p>
+            </div>
+
+            <!-- Mot de Passe -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Mot de Passe</label>
+                <input v-model="form.password" type="password" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                <p v-if="form.errors?.password" class="text-red-500 text-xs mt-1">{{ form.errors.password }}</p>
+            </div>
+
+            <!-- Rôle -->
+            <div>
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Rôle</label>
+                <select v-model="form.role" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <option value="agent">Agent de service</option>
+                    <option value="admin">Administrateur</option>
+                    <option value="viewer">Maire / Superviseur (Lecture seule)</option>
+                </select>
+            </div>
+
+            <!-- Service Attribué (uniquement pour les agents) -->
+            <div v-if="form.role === 'agent'">
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Service Attribué</label>
+                <select v-model="form.service_id" class="w-full px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none" :required="form.role === 'agent'">
+                    <option value="" disabled>Sélectionner un service</option>
+                    <option v-for="service in services" :key="service.id" :value="service.id">
+                        {{ service.nom }}
+                    </option>
+                </select>
+                <p v-if="form.errors?.service_id" class="text-red-500 text-xs mt-1">{{ form.errors.service_id }}</p>
+            </div>
+                
+            <div class="flex justify-end space-x-3 pt-4 border-t">
+                <button type="button" @click="showModal = false" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800">
+                    Annuler
+                </button>
+                <button type="submit" :disabled="form.processing" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition flex items-center gap-2">
+                    <span v-if="form.processing">Création...</span>
+                    <span v-else>Créer le compte</span>
+                </button>
+            </div>
+        </form>
     </div>
+</div>
+</div>
+
 
     <!-- Modale de Consultation de Dossier -->
 <div v-if="showDossierModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
@@ -1164,7 +1251,6 @@ const renderBarChart = async () => {
                 ✕
             </button>
         </div>
-
         <!-- Informations Générales -->
         <div class="grid grid-cols-2 gap-4 my-5 text-xs">
             <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
@@ -1234,60 +1320,116 @@ const renderBarChart = async () => {
         </div>
     </div>
 
-    <!-- Pop-up de consultation du dossier -->
+    <!-- Pop-up de consultation du dossier (Nouveau Design) -->
 <div 
-    v-if="showDossierModal && selectedDossier" 
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+  v-if="showDossierModal && selectedDossier"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
 >
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100">
-        <!-- Titre de la pop-up -->
-        <div class="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
-            <h3 class="font-bold text-base">Détails du Dossier</h3>
-            <button @click="showDossierModal = false" class="text-slate-400 hover:text-white">✕</button>
+  <div 
+    class="bg-slate-100 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+  >
+    <!-- En-tête bleu foncé avec icône dossier et référence -->
+    <div class="px-6 py-5 bg-[#1b253b] text-white flex items-start justify-between">
+      <div class="flex items-center gap-4">
+        <!-- Icône Dossier Bleue -->
+        <div class="p-3 bg-blue-600/30 text-blue-400 rounded-xl flex items-center justify-center">
+          <svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M19.5 21a3 3 0 003-3v-8a3 3 0 00-3-3h-7.69l-1.92-2.112A2 2 0 008.4 4H4.5a3 3 0 00-3 3v11a3 3 0 003 3h15z" />
+          </svg>
         </div>
-
-        <!-- Informations du dossier -->
-        <div class="p-6 space-y-4">
-            <div>
-                <p class="text-xs font-bold text-slate-400 uppercase">Référence & Titre</p>
-                <p class="text-base font-bold text-slate-800">{{ selectedDossier.reference }} - {{ selectedDossier.titre }}</p>
-            </div>
-
-            <div class="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-  <div>
-    <p class="text-xs font-bold text-slate-400 uppercase">Service originel</p>
-    <p class="text-sm font-semibold text-slate-700">
-      {{ selectedDossier?.service?.nom || selectedDossier?.service_nom || selectedDossier?.boite?.casier?.service?.nom || 'N/A' }}
-    </p>
-  </div>
-  <div>
-    <p class="text-xs font-bold text-slate-400 uppercase">Numéro de Boîte</p>
-    <p class="text-sm font-semibold text-slate-700">
-      {{ selectedDossier?.boite?.nom || selectedDossier?.boite?.numero || selectedDossier?.boite_nom || 'N/A' }}
-    </p>
-  </div>
-</div>
-
-            <div>
-                <p class="text-xs font-bold text-slate-400 uppercase mb-1">Description / Contenu</p>
-                <p class="text-sm text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                    {{ selectedDossier.description || 'Aucune description disponible.' }}
-                </p>
-            </div>
+        <div>
+          <h3 class="font-bold text-lg leading-snug text-white">
+            {{ selectedDossier.titre || selectedDossier.nom || 'Pieces justificatives des dépenses' }}
+          </h3>
+          <p class="text-xs font-semibold text-slate-400 tracking-wide mt-0.5 uppercase">
+            RÉF: {{ selectedDossier.reference || 'N/A' }}
+          </p>
         </div>
-
-        <!-- Bouton de fermeture -->
-        <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-            <button 
-                @click="showDossierModal = false" 
-                class="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl"
-            >
-                Fermer
-            </button>
-        </div>
+      </div>
+      <!-- Bouton fermer X -->
+      <button 
+        @click="showDossierModal = false" 
+        class="text-slate-400 hover:text-white transition-colors p-1"
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
-</div>
 
+    <!-- Corps de la modale -->
+    <div class="p-6 space-y-6">
+      <!-- Grille des métadonnées (2 colonnes) -->
+      <div class="grid grid-cols-2 gap-y-5 gap-x-6">
+        <!-- Service Émetteur -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Service Émetteur</p>
+          <p class="text-sm font-bold text-slate-800">
+            {{ selectedDossier?.service?.nom || selectedDossier?.service_nom || selectedDossier?.boite?.casier?.service?.nom || 'N/A' }}
+          </p>
+        </div>
+
+        <!-- Emplacement / Casier -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Emplacement / Casier</p>
+          <p class="text-sm font-bold text-slate-800">
+            {{ selectedDossier?.boite?.nom || selectedDossier?.emplacement || 'Boîte undefined' }}
+          </p>
+        </div>
+
+        <!-- Date d'ouverture -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Date d'ouverture</p>
+          <p class="text-sm font-bold text-slate-800">
+            {{ formatDate(selectedDossier.created_at || selectedDossier.date_ouverture) }}
+          </p>
+        </div>
+
+        <!-- Statut d'indexation -->
+        <div>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Statut d'indexation</p>
+          <div class="flex items-center gap-1.5 text-sm font-bold text-emerald-600">
+            <svg class="w-4 h-4 text-cyan-500 fill-current" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <span>Numérisé & Archivé</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Description / Section Document Numérisé -->
+      <div class="space-y-1">
+        <h4 class="text-sm font-bold text-slate-700">Document Numérisé</h4>
+        <p class="text-xs text-slate-500 leading-relaxed">
+          Ce document est disponible au format PDF sécurisé avec signature électronique municipale.
+        </p>
+      </div>
+
+      <!-- Actions (Télécharger & Fermer) -->
+      <div class="pt-2 flex items-center justify-between">
+        <!-- Bouton Télécharger / Exporter en PDF -->
+        <button 
+              type="button"
+              @click="exportPDF"
+              class="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-xl shadow-md transition-colors"
+          >
+  
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+            Télécharger la copie numérique
+        </button>
+
+        <button 
+          @click="showDossierModal = false"
+          class="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          Fermer
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 </div>
 
 <!-- Modal Édition Utilisateur -->
@@ -1356,4 +1498,119 @@ const renderBarChart = async () => {
     </div>
     
 </div>
+
+<!-- Fiche d'Archive officielle (Génération PDF) -->
+<div style="display: none;">
+  <div 
+    id="pdf-content" 
+    class="p-8 bg-white font-sans text-slate-800" 
+    style="width: 190mm; box-sizing: border-box; margin: 0 auto;"
+  >
+    <!-- En-tête Officiel avec Logo -->
+    <div class="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-center gap-4">
+      <div class="flex items-center gap-4">
+        <!-- Logo de la Commune (Assurez-vous d'avoir l'image dans /public/images/logo.png) -->
+        <img src="/images/logo.png" alt="Logo Commune" class="w-16 h-16 object-contain shrink-0" />
+        <div>
+          <h1 class="text-lg font-bold uppercase tracking-wide text-slate-900">Commune Urbaine de Mahajanga</h1>
+          <p class="text-xs text-slate-500 font-semibold uppercase">Service de Gestion des Archives Numériques</p>
+        </div>
+      </div>
+      
+      <!-- Zone Référence -->
+      <div class="text-right shrink-0">
+  <span class="inline-block px-3 py-1 bg-slate-100 border border-slate-300 text-xs font-mono font-bold rounded">
+    RÉF : {{ 
+      selectedDossier?.reference || 
+      selectedDossier?.ref || 
+      selectedDossier?.num_ref || 
+      selectedDossier?.numero_reference || 
+      selectedDossier?.code || 
+      (selectedDossier?.id ? `REF-2026-${selectedDossier.id}` : 'N/A') 
+    }}
+  </span>
+</div>
+    </div>
+
+    <!-- Titre du Document -->
+    <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Intitulé du Dossier</p>
+      <h2 class="text-base font-bold text-slate-900">
+        {{ selectedDossier?.titre || selectedDossier?.intitule || selectedDossier?.nom || 'N/A' }}
+      </h2>
+    </div>
+
+    <!-- Tableau des Métadonnées -->
+    <table class="w-full border-collapse mb-6 text-xs">
+      <tbody>
+        <!-- Service Émetteur -->
+        <tr class="border-b border-slate-200">
+          <td class="py-2.5 px-2 font-bold text-slate-500 w-1/3 bg-slate-50/50">Service Émetteur</td>
+          <td class="py-2.5 px-2 font-semibold text-slate-800">
+            {{ 
+              selectedDossier?.boite?.casier?.service?.nom || 
+              selectedDossier?.service?.nom || 
+              selectedDossier?.boite?.service?.nom || 
+              selectedDossier?.service_nom || 
+              'N/A' 
+            }}
+          </td>
+        </tr>
+
+        <!-- Emplacement / Casier -->
+        <tr class="border-b border-slate-200">
+          <td class="py-2.5 px-2 font-bold text-slate-500 bg-slate-50/50">Emplacement / Casier</td>
+          <td class="py-2.5 px-2 font-semibold text-slate-800">
+            {{ 
+              [
+                selectedDossier?.boite?.nom || selectedDossier?.boite?.numero_boite,
+                selectedDossier?.boite?.casier?.nom || selectedDossier?.casier?.nom || selectedDossier?.casier
+              ].filter(Boolean).join(' - ') || 'N/A' 
+            }}
+          </td>
+        </tr>
+
+        <!-- Date d'Ouverture / Création -->
+        <tr class="border-b border-slate-200">
+          <td class="py-2.5 px-2 font-bold text-slate-500 bg-slate-50/50">Date d'Ouverture / Création</td>
+          <td class="py-2.5 px-2 font-semibold text-slate-800">
+            {{ 
+              selectedDossier?.created_at 
+                ? new Date(selectedDossier.created_at).toLocaleDateString('fr-FR') 
+                : (selectedDossier?.date_ouverture || 'N/A') 
+            }}
+          </td>
+        </tr>
+
+        <!-- Statut de Numérisation -->
+        <tr class="border-b border-slate-200">
+          <td class="py-2.5 px-2 font-bold text-slate-500 bg-slate-50/50">Statut de Numérisation</td>
+          <td class="py-2.5 px-2 font-semibold text-emerald-700">✓ Numérisé et archivé dans le système</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Description -->
+    <div class="mb-6">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Description & Contenu</p>
+      <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 leading-relaxed min-h-[60px]">
+        {{ selectedDossier?.description || 'Archive regroupant les demandes officielles de congés payés, autorisations spéciales d\'absence, arrêtés maladie et justificatifs de présence déposés par les agents municipaux.' }}
+      </div>
+    </div>
+
+    <!-- Zone de validation / Signature -->
+    <div class="mt-8 pt-4 border-t border-slate-200 grid grid-cols-2 gap-8 text-xs">
+      <div>
+        <p class="font-bold text-slate-500">Agent responsable :</p>
+        <p class="mt-10 font-semibold text-slate-800">Signature & Cachet</p>
+      </div>
+      <div class="text-right">
+        <p class="font-bold text-slate-500">Fait à Mahajanga, le :</p>
+        <p class="mt-1 text-slate-700">{{ new Date().toLocaleDateString('fr-FR') }}</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 </template>

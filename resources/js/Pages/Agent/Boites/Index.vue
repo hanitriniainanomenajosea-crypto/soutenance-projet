@@ -75,11 +75,23 @@ const submitDossier = () => {
     });
 };
 
-const deleteBoite = (boiteId) => {
-    if (confirm('Voulez-vous vraiment supprimer cette boîte ?')) {
-        router.delete(route('agent.boites.destroy', boiteId));
+const deleteBoite = (id) => {
+    // 1. Trouver la boîte correspondante dans votre liste
+    const targetBoite = props.boites.find(b => b.id === id);
+    
+    // 2. Vérifier si elle contient des dossiers
+    const count = targetBoite?.dossiers?.length || 0;
+    
+    if (count > 0) {
+        alert(`Impossible de supprimer cette boîte : elle contient encore ${count} dossier(s).`);
+        return;
     }
-};
+
+    // 3. Demander confirmation puis supprimer
+    if (confirm("Voulez-vous vraiment supprimer cette boîte ?")) {
+        router.delete(route('agent.boites.destroy', id));
+    }
+}
 // Modale d'Édition / Modification de Casier
 const showEditModal = ref(false);
 const editingBoite = ref(null);
@@ -185,11 +197,22 @@ const submitEdit = () => {
                         🛠️ Modifier la boîte
                 </button>
                 <button 
-                    @click="deleteBoite(boite.id)" 
-                    class="w-full px-3 py-1.5 hover:bg-red-50 text-red-600 flex items-center gap-1.5"
-                >
-                    Supprimer
-                    </button>
+    @click="deleteBoite(boite)" 
+    :disabled="boite.dossiers && boite.dossiers.length > 0"
+    :class="[
+        boite.dossiers && boite.dossiers.length > 0 
+            ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-400' 
+            : 'hover:bg-red-50 text-red-600'
+    ]"
+    class="w-full px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold rounded-lg transition-all"
+    :title="boite.dossiers && boite.dossiers.length > 0 ? 'Impossible de supprimer : la boîte contient des dossiers' : 'Supprimer la boîte'"
+>
+    <!-- Icône Poubelle -->
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+    Supprimer
+</button>
                 </div>
             </div>
         </div>
@@ -197,7 +220,7 @@ const submitEdit = () => {
         <!--  boîte -->
         <Link :href="route('agent.boites.show', boite.id)" class="flex flex-col items-center justify-center my-auto group/item">
             <div class="w-10 h-10 rounded-xl bg-slate-50 group-hover/item:bg-blue-50 flex items-center justify-center transition-colors mb-1">
-                <span class="text-2xl group-hover/item:scale-110 transition-transform duration-200">📦</span>
+                <img src="/images/folder.png" alt="Icone Boite" class="w-12 h-12 mx-auto object-contain group-hover/item:scale-10 transition-transform duration-200">
             </div>
 
             <h3 class="font-bold text-slate-800 text-xs group-hover/item:text-blue-600 transition-colors line-clamp-1">

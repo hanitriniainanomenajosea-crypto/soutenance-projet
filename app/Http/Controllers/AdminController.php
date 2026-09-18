@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Http\Controllers;
-
 use App\Models\User;
 use App\Models\Service;
 use App\Models\Boite;
@@ -24,38 +22,42 @@ class AdminController extends Controller
             'boites'   => Boite::count(),
             'dossiers' => Dossier::count(),
         ],
-        // --- AJOUT DE L'HISTORIQUE DES LOGS ---
-        'logs'     => Log::with('user')->latest()->take(10)->get(),
+        // --- HISTORIQUE CORRIGÉ (charge l'utilisateur ET son service) ---
+        'logs'     => Log::with(['user.service'])->latest()->take(10)->get(),
     ]);
 }
-
     // Enregistrement d'un nouvel utilisateur
     public function storeUser(Request $request)
-    {
-        $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
-            'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', 'in:admin,agent'],
-            'service_id' => ['nullable', 'exists:services,id'],
-        ]);
+{
+    $request->validate([
+        'name'       => ['required', 'string', 'max:255'],
+        'email'      => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+        'password'   => ['required', 'string', 'min:8'],
+        'role'       => ['required', 'in:admin,agent,viewer'], // <-- On a ajouté 'viewer' ici
+        'service_id' => ['nullable', 'required_if:role,agent', 'exists:services,id'],
+    ]);
 
-        User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'role' => $request->role,
-            'service_id' => $request->role === 'agent' ? $request->service_id : null,
-        ]);
+    // Découpage du nom complet
+    $parts  = explode(' ', trim($request->name), 2);
+    $nom    = $parts[0];
+    $prenom = $parts[1] ?? '';
 
-        Log::record(
-    'Création Utilisateur',
-    "Création de l'utilisateur {$request->name} ({$request->email})"
-);
+    User::create([
+        'nom'        => $nom,
+        'prenom'     => $prenom,
+        'email'      => $request->email,
+        'password'   => Hash::make($request->password),
+        'role'       => $request->role,
+        'service_id' => $request->role === 'agent' ? $request->service_id : null,
+    ]);
 
-        return back()->with('success', 'Compte créé avec succès.');
-    }
+    Log::record(
+        'Création Utilisateur',
+        "Création de l'utilisateur {$request->name} ({$request->email})"
+    );
 
+    return back()->with('success', 'Compte créé avec succès.');
+}
 
     // Modification d'un utilisateur existant
     public function updateUser(Request $request, User $user)
@@ -85,7 +87,6 @@ class AdminController extends Controller
     'Suppression Utilisateur',
     "Suppression de l'utilisateur {$user->name} ({$user->email})"
 );
-
         $user->delete();
 
         return back()->with('success', 'Utilisateur supprimé avec succès.');

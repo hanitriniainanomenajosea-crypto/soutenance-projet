@@ -142,7 +142,7 @@ const deleteDossier = (id) => {
                 <th class="py-4 px-4">Intitulé du dossier</th>
                 <th class="py-4 px-4">Boîte d'emplacement</th>
                 <th class="py-4 px-4">Date d'ouverture</th>
-                <th class="py-4 px-4 text-center">Voir</th>
+                
                 <th class="py-4 px-4 text-right">Actions</th>
             </tr>
         </thead>
@@ -163,32 +163,23 @@ const deleteDossier = (id) => {
                     {{ dossier.titre || dossier.intitule }}
                 </td>
 
-                <!-- 3. Boîte -->
-                <td class="py-3 px-4">
-                    <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-medium text-[11px]">
-                        {{ dossier.boite ? dossier.boite.nom : 'Non assigné' }}
-                    </span>
-                </td>
+                <!-- 3. Boîte d'emplacement (Casier + Numéro de boîte) -->
+<td class="py-3 px-4">
+    <div class="flex flex-col">
+        <!-- Nom du Casier (ex: Casier A, Casier B) -->
+        <span class="font-semibold text-slate-800 text-xs">
+            {{ dossier.boite?.casier?.nom || dossier.boite?.casier?.libelle || 'Casier non spécifié' }}
+        </span>
+        
+    </div>
+</td>
 
                 <!-- 4. Date -->
                 <td class="py-3 px-4 text-slate-500">
-                    {{ dossier.date_ouverture || dossier.created_at }}
+                    {{ (dossier.date_ouverture || dossier.created_at) ? new Date(dossier.date_ouverture || dossier.created_at).toLocaleDateString('fr-FR') : 'N/A' }}
                 </td>
 
-                
-
-                <!-- 6. Bouton VOIR -->
-                <td class="py-3 px-4 text-center">
-                    <button 
-                        @click="openShowModal(dossier)" 
-                        title="Voir le contenu du dossier"
-                        class="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors inline-flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                    </button>
-                </td>
+               
 
                 <!-- 7. Actions -->
                 <td class="py-3 px-4 text-right">
@@ -199,6 +190,15 @@ const deleteDossier = (id) => {
                         <button @click="deleteDossier(dossier.id)" class="text-red-600 hover:bg-red-50 px-2 py-1 rounded-md font-medium text-[11px]">
                             Supprimer
                         </button>
+                        <button 
+                        @click="openShowModal(dossier)" 
+                        title="Voir le contenu du dossier"
+                        class="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors inline-flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                    </button>
                     </div>
                 </td>
             </tr>

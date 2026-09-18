@@ -104,10 +104,9 @@ const submit = () => {
               Enregistrer la boîte
             </button>
           </div>
-
+          
         </form>
       </div>
-
     </div>
   </div>
 </template>

@@ -6,20 +6,20 @@
     ]"
   >
     <!-- En-tête : Logo & Titre -->
-    <div>
-      <div class="flex items-center gap-3 p-5 border-b border-slate-800/80">
-        <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-white shrink-0 shadow-md p-1">
-  <img 
-    src="/images/logo.png" 
-    alt="Logo Commune Urbaine de Mahajanga" 
-    class="w-full h-full object-contain"
-  />
-</div>
-        <div v-if="!isCollapsed" class="overflow-hidden whitespace-nowrap">
-          <h1 class="font-bold text-white text-base leading-tight">Archivage Numérique</h1>
-          <span class="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">ADMIN</span>
-        </div>
-      </div>
+<div>
+  <div class="flex items-center gap-3 p-5 border-b border-slate-800/80">
+    <!-- Logo direct sans fond blanc ni bordure -->
+    <img 
+      src="/images/logo.png" 
+      alt="Logo Commune Urbaine de Mahajanga" 
+      class="w-12 h-12 object-contain shrink-0 drop-shadow-md"
+    />
+
+    <div v-if="!isCollapsed" class="overflow-hidden whitespace-nowrap">
+      <h1 class="font-bold text-white text-base leading-tight">Archivage Numérique</h1>
+      <span class="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">ADMIN</span>
+    </div>
+  </div>
 
       <!-- Navigation -->
       <nav class="p-3 space-y-1.5 mt-2">
@@ -38,7 +38,7 @@
           </svg>
           <span v-if="!isCollapsed" class="truncate">Tableau de Bord Global</span>
         </a>
-      
+
         <a 
           href="#" 
           :class="[
@@ -52,7 +52,7 @@
           <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
           </svg>
-          <span v-if="!isCollapsed" class="truncate">Utilisateurs Enregistrés</span>
+          <span v-if="!isCollapsed" class="truncate">Gestion d'utilisateur</span>
         </a>
 
         <a 
@@ -107,7 +107,6 @@ const props = defineProps({
   isCollapsed: Boolean,
   activeTab: String
 })
-
 const emit = defineEmits(['update:isCollapsed', 'update:activeTab'])
 
 const toggleCollapse = () => {

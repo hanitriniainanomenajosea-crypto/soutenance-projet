@@ -101,6 +101,28 @@ const theme = computed(() => {
                     </Link>
                 </div>
             </div>
+            <!-- Footer global -->
+<footer class="mt-auto py-6 border-t border-slate-200/60 bg-white/50 backdrop-blur-sm text-slate-500 text-xs">
+  <div class="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+    
+    <!-- Branding & Droits -->
+    <div class="flex items-center gap-2">
+      <span class="font-bold text-slate-700">Commune Urbaine de Mahajanga</span>
+      <span class="text-slate-300">•</span>
+      <span>© 2026 Tous droits réservés</span>
+    </div>
+
+    <!-- Info Application & Version -->
+    <div class="flex items-center gap-4 text-slate-400">
+      <span>Système de Gestion des Archives Numériques</span>
+      <span class="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-mono text-slate-600 font-semibold border border-slate-200">
+        v1.0
+      </span>
+    </div>
+
+  </div>
+</footer>
+
         </main>
     </div>
     </AgentLayout>

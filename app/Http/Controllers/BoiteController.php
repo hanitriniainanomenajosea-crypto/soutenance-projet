@@ -26,15 +26,19 @@ class BoiteController extends Controller
 }
     public function destroy($id)
 {
-    $boite = Boite::findOrFail($id);
-    
-    if ($boite->casier_id) {
-        \App\Models\Casier::destroy($boite->casier_id);
+    $boite = Boite::withCount('dossiers')->findOrFail($id);
+
+    // 1. Bloquer la suppression si la boîte contient au moins un dossier
+    if ($boite->dossiers_count > 0) {
+        return redirect()->back()->withErrors([
+            'message' => "Impossible de supprimer cette boîte : elle contient encore {$boite->dossiers_count} dossier(s)."
+        ]);
     }
-    
+
+    // 2. Supprimer uniquement la boîte d'archive (sans toucher au casier)
     $boite->delete();
 
-    return redirect()->back();
+    return redirect()->back()->with('success', 'Boîte supprimée avec succès.');
 }
 
     // Voir le contenu d'une boîte quand on clique dessus
